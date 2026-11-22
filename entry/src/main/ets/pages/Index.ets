@@ -15,13 +15,12 @@ import { LocalFs } from '../fs/LocalFs';
 import { LocalSession } from '../session/LocalSession';
 import { SshSessionAdapter } from '../session/SshSessionAdapter';
 import { TerminalSession } from '../session/TerminalSession';
-import { SftpClient } from '../ssh/SshClient';
 import { SshProfile, ProfileStore } from '../services/ProfileStore';
 import { SecretStore, passwordAlias, passphraseAlias } from '../services/SecretStore';
 import { Paths } from '../services/Paths';
 import { TerminalView } from '../ui/TerminalView';
-import { FileBrowser } from '../ui/FileBrowser';
 import { Logger } from '../common/Logger';
+import { requestStorage } from '../common/Permissions';
 
 const TAG: string = 'Index';
 
@@ -43,7 +42,6 @@ struct Index {
   @State sessions: Array<SessionTab> = [];
   @State activeId: string = '';
   @State profiles: Array<SshProfile> = [];
-  @State remoteVersion: number = 0;
   @State connectState: string = '';
   @State pendingKind: string = '';
   @State pendingFingerprint: string = '';
@@ -84,6 +82,7 @@ struct Index {
       } catch (err) {
         Logger.warn(TAG, `profile init failed: ${(err as Error).message}`);
       }
+      await requestStorage(context);
     }
     this.localFs = new LocalFs(Paths.filesDir());
     this.addLocalSession();
@@ -102,7 +101,6 @@ struct Index {
 
   private activate(id: string): void {
     this.activeId = id;
-    this.remoteVersion++;
   }
 
   private closeTab(id: string): void {
@@ -122,7 +120,6 @@ struct Index {
     if (this.activeId === id) {
       this.activeId = remaining.length > 0 ? remaining[remaining.length - 1].id : '';
     }
-    this.remoteVersion++;
   }
 
   private activeSession(): TerminalSession | null {
@@ -132,11 +129,6 @@ struct Index {
       }
     }
     return null;
-  }
-
-  private activeSftp(): SftpClient | null {
-    const session: TerminalSession | null = this.activeSession();
-    return session === null ? null : session.sftp();
   }
 
   private resetForm(): void {
@@ -309,7 +301,6 @@ struct Index {
     this.sessions = this.sessions.concat([tab]);
     this.activate(tab.id);
     this.connectState = `Connected to ${profile.host}`;
-    this.remoteVersion++;
     this.tabsController.changeIndex(0);
   }
 
@@ -688,7 +679,7 @@ struct Index {
         Text(`Version ${Paths.VERSION}`)
           .fontSize(10)
           .fontColor('#7f8aa3')
-        Text('A terminal for HarmonyOS with a local sandbox shell, SSH sessions on libssh2, and a two-pane file browser with recursive copy between the sandbox and SFTP.')
+        Text('A terminal for HarmonyOS with a local sandbox shell, SSH sessions on libssh2, and read/write mounts for the public Download and Documents folders.')
           .fontSize(11)
           .fontColor('#aab3c5')
         Divider().color('#2b3448')
@@ -708,7 +699,7 @@ struct Index {
         Text('Security notes')
           .fontSize(12)
           .fontColor('#d7dce8')
-        Text('Host keys are checked before any credential is sent. The first contact stores a SHA-256 fingerprint (trust on first use); later changes are reported as mismatches. Passwords and key passphrases are stored in the system Asset Store Kit, never in Preferences or logs. SFTP transfers run on a separate SSH session.')
+        Text('Host keys are checked before any credential is sent. The first contact stores a SHA-256 fingerprint (trust on first use); later changes are reported as mismatches. Passwords and key passphrases are stored in the system Asset Store Kit, never in Preferences or logs. Storage access is requested at runtime and can be declined.')
           .fontSize(10)
           .fontColor('#aab3c5')
         Text('Limitations')
@@ -736,15 +727,6 @@ struct Index {
         this.terminalPage()
       }
       .tabBar('Terminal')
-
-      TabContent() {
-        FileBrowser({
-          localFs: this.localFs,
-          sftp: this.activeSftp(),
-          remoteVersion: this.remoteVersion
-        })
-      }
-      .tabBar('Files')
 
       TabContent() {
         this.hostsPage()

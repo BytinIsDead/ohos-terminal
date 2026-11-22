@@ -7,31 +7,78 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  *
  * Local filesystem adapter: maps the virtual root '/' onto the application
- * sandbox directory. Normalising every path before mapping keeps the shell and
- * file browser confined to the sandbox.
+ * sandbox directory, plus the public Download and Documents directories when
+ * its storage permissions are granted. Normalising every path before mapping
+ * keeps the shell from escaping through '..'.
  */
 
 import fs from '@ohos.file.fs';
+import Environment from '@ohos.file.environment';
 import { FileEntry } from '../core/fs/FileEntry';
 import { ShellFs } from '../core/shell/Shell';
 import { normalizePath } from '../core/fs/PathUtil';
 
+class Mount {
+  path: string;
+  root: string;
+
+  constructor(path: string, root: string) {
+    this.path = path;
+    this.root = root.endsWith('/') ? root.substring(0, root.length - 1) : root;
+  }
+}
+
 export class LocalFs implements ShellFs {
   cwd: string = '/';
   private baseDir: string;
+  private mounts: Array<Mount> = [];
 
   constructor(baseDir: string) {
     this.baseDir = baseDir.endsWith('/')
       ? baseDir.substring(0, baseDir.length - 1) : baseDir;
+    this.initMounts();
+  }
+
+  private initMounts(): void {
+    try {
+      this.mounts.push(new Mount('/download', Environment.getUserDownloadDir()));
+    } catch (e) {
+      // Permission denied or unsupported device: keep the mount hidden.
+    }
+    try {
+      this.mounts.push(new Mount('/documents', Environment.getUserDocumentDir()));
+    } catch (e) {
+      // ditto
+    }
+  }
+
+  private mountFor(path: string): Mount | null {
+    for (let i = 0; i < this.mounts.length; i++) {
+      const mount: Mount = this.mounts[i];
+      if (path === mount.path || path.startsWith(mount.path + '/')) {
+        return mount;
+      }
+    }
+    return null;
+  }
+
+  private mountEntry(mount: Mount): FileEntry {
+    return new FileEntry(mount.path.substring(1), mount.path, true, false, 0,
+      Date.now(), 0o040755, 0, 0, '', '', 'mount');
   }
 
   root(): string {
     return this.baseDir;
   }
 
-  /** Virtual path -> sandbox path. */
+  /** Virtual path -> real path (sandbox by default, mounts by prefix). */
   real(path: string): string {
     const normalized: string = normalizePath(path);
+    const mount: Mount | null = this.mountFor(normalized);
+    if (mount !== null) {
+      const rest: string = normalized.substring(mount.path.length);
+      return rest.length === 0 ? mount.root : mount.root + rest;
+    }
     return normalized === '/' ? this.baseDir : this.baseDir + normalized;
   }
 
@@ -52,7 +99,12 @@ export class LocalFs implements ShellFs {
   }
 
   stat(path: string): FileEntry | null {
-    const realPath: string = this.real(path);
+    const normalized: string = normalizePath(path);
+    const mount: Mount | null = this.mountFor(normalized);
+    if (mount !== null && normalized === mount.path) {
+      return this.mountEntry(mount);
+    }
+    const realPath: string = this.real(normalized);
     try {
       const stat: fs.Stat = this.lstat(realPath);
       let isLink: boolean = false;
@@ -80,10 +132,24 @@ export class LocalFs implements ShellFs {
   }
 
   list(path: string): Array<FileEntry> {
-    const realPath: string = this.real(path);
-    const names: Array<string> = fs.listFileSync(realPath);
-    const out: Array<FileEntry> = [];
     const base: string = normalizePath(path);
+    if (base === '/' && this.mounts.length > 0) {
+      // A mount can shadow a sandbox entry of the same name; expose the mount.
+      const real: Array<FileEntry> = [];
+      const names: Array<string> = fs.listFileSync(this.real('/'));
+      for (let i = 0; i < names.length; i++) {
+        const entry: FileEntry | null = this.stat(`/${names[i]}`);
+        if (entry !== null && this.mountFor(`/${names[i]}`) === null) {
+          real.push(entry);
+        }
+      }
+      for (let i = 0; i < this.mounts.length; i++) {
+        real.push(this.mountEntry(this.mounts[i]));
+      }
+      return real;
+    }
+    const names: Array<string> = fs.listFileSync(this.real(base));
+    const out: Array<FileEntry> = [];
     for (let i = 0; i < names.length; i++) {
       const childPath: string = base === '/' ? `/${names[i]}` : `${base}/${names[i]}`;
       const entry: FileEntry | null = this.stat(childPath);

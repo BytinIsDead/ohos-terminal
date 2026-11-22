@@ -15,6 +15,10 @@
     {
       "name": "perm_internet_reason",
       "value": "Connect to SSH/SFTP servers you configure"
+    },
+    {
+      "name": "perm_storage_reason",
+      "value": "Read and write the public Download and Documents folders from the shell"
     }
   ]
 }

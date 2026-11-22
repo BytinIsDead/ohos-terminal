@@ -5,21 +5,24 @@
 OHOS Terminal provides:
 
 - a **virtual local shell** over the application sandbox (no process
-  execution, no device shell);
-- an **SSH client** (libssh2 + mbedTLS) with an interactive shell channel
-  and an SFTP channel;
-- a **two-pane browser** that copies files between the sandbox and the
-  remote server.
+  execution, no device shell), plus read/write mounts for the public
+  Download and Documents folders when the user grants storage access;
+- an **SSH client** (libssh2 + mbedTLS) with an interactive shell channel.
 
-The app requests `ohos.permission.INTERNET` only.
+The app requests `ohos.permission.INTERNET` plus the normal-level,
+user-granted `READ_WRITE_DOWNLOAD_DIRECTORY` and
+`READ_WRITE_DOCUMENTS_DIRECTORY` permissions. The storage request is shown
+at first launch; declining it simply hides `/download` and `/documents`.
 
 ## Local sandbox confinement
 
 `LocalFs` maps the virtual POSIX root `/` to the app's `filesDir`. Every
 requested path is normalized first (`PathUtil.normalizePath`/`resolvePath`);
-`..` clamps at `/`, so a virtual path can never resolve outside the
-sandbox. The shell (`core/shell/Shell.ets`) only sees the `ShellFs`
-interface and never touches the device filesystem directly.
+`..` clamps at `/`. Paths under `/download` and `/documents` are mapped to
+the public user folders returned by `@ohos.file.environment`; those two
+folders exist only when the corresponding permission was granted. The
+shell (`core/shell/Shell.ets`) only sees the `ShellFs` interface and never
+touches the device filesystem directly.
 
 ## Credential handling
 
@@ -44,9 +47,9 @@ interface and never touches the device filesystem directly.
 - SSH runs through libssh2 1.11.1 with mbedTLS 3.6.2, both pinned by
   SHA-256 at build time and linked statically.
 - The default port is 22; the port is configurable per profile.
-- The shell uses a non-blocking channel; SFTP calls use a separate session
-  channel and are executed as N-API async work, so the UI thread is not
-  blocked.
+- The shell uses a non-blocking SSH channel, so UI input and rendering
+  never wait on the network.
+- The separately published archiver app has no network permission at all.
 
 ## Secrets in memory and logs
 
@@ -62,8 +65,8 @@ interface and never touches the device filesystem directly.
   definition; verify the fingerprint out of band if that matters.
 - The terminal soft keyboard is line-based. Single-key interaction uses
   the key bar. There is no terminal-level clipboard history.
-- SFTP transfers are serialized, and the app does not currently support
-  port forwarding, agent forwarding or X11.
+- SFTP transfers, port forwarding, agent forwarding and X11 are not part
+  of the terminal app; use `ohos-archiver` for local file management.
 - The unsigned CI artifact must be signed locally before installation.
 - No device testing has been performed by the maintainers for every vendor
   build; treat it as beta software.

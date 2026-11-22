@@ -8,10 +8,10 @@
  *
  * SSH session adapter. The host key is verified before any credential is sent
  * (TOFU): handshake() returns the fingerprint, the UI pins or rejects it, and
- * only then does login() authenticate and open the shell + SFTP channel.
+ * only then does login() authenticate and open the shell channel.
  */
 
-import { SshConnection, SftpClient, HostKeyError } from '../ssh/SshClient';
+import { SshConnection, HostKeyError } from '../ssh/SshClient';
 import { SshProfile } from '../services/ProfileStore';
 import { TerminalSession } from './TerminalSession';
 import { utf8Encode } from '../core/ansi/Keys';
@@ -19,7 +19,6 @@ import { utf8Encode } from '../core/ansi/Keys';
 export class SshSessionAdapter extends TerminalSession {
   private conn: SshConnection = new SshConnection();
   private profile: SshProfile;
-  private sftpClient: SftpClient | null = null;
   private eofReported: boolean = false;
 
   constructor(profile: SshProfile) {
@@ -54,15 +53,11 @@ export class SshSessionAdapter extends TerminalSession {
       } else {
         await this.conn.authPassword(this.profile.user, password);
       }
-      this.status = 'sftp';
-      const home: string = await this.conn.openSftpChannel();
-      this.sftpClient = new SftpClient(this.conn, home);
       this.status = 'shell';
       await this.conn.startShell(80, 24);
       this.status = 'connected';
       this.feedLine(`Connected to ${this.profile.user}@${this.profile.host}:${this.profile.port}`);
       this.feedLine(`Host key: ${this.conn.hostKeyType} SHA256:${this.conn.fingerprint}`);
-      this.feedLine(`SFTP home: ${home}`);
       this.feedLine('');
     } catch (err) {
       this.status = 'error';
@@ -158,10 +153,6 @@ export class SshSessionAdapter extends TerminalSession {
     this.closed = true;
     this.status = 'closed';
     this.conn.close();
-  }
-
-  sftp(): SftpClient | null {
-    return this.sftpClient;
   }
 
   kind(): string {

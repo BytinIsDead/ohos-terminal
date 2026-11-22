@@ -10,7 +10,6 @@
 import { VtScreen } from '../core/ansi/VtScreen';
 import { KeyEncoder, asciiBytes, utf8Encode } from '../core/ansi/Keys';
 import { Completion } from '../core/shell/Shell';
-import { SftpClient } from '../ssh/SshClient';
 
 /** Common surface the terminal view drives; local and SSH back it. */
 export abstract class TerminalSession {
@@ -39,10 +38,6 @@ export abstract class TerminalSession {
   }
 
   completeLine(line: string, caret: number): Completion | null {
-    return null;
-  }
-
-  sftp(): SftpClient | null {
     return null;
   }
 

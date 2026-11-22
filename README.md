@@ -2,9 +2,12 @@
 
 [![CI](https://github.com/BytinIsDead/ohos-terminal/actions/workflows/ci.yml/badge.svg)](https://github.com/BytinIsDead/ohos-terminal/actions/workflows/ci.yml)
 
-A terminal, SSH client and two-pane file browser for HarmonyOS (API 24,
-DevEco Studio 6.1.1). Clean-room ArkTS + a small N-API core around libssh2
-and mbedTLS. No JavaScript runtimes, no WebView, no shell process.
+A terminal and SSH client for HarmonyOS (API 24, DevEco Studio 6.1.1).
+Clean-room ArkTS + a small N-API core around libssh2 and mbedTLS. No
+JavaScript runtimes, no WebView, no shell process.
+
+The file manager moved to a separate app:
+[BytinIsDead/ohos-archiver](https://github.com/BytinIsDead/ohos-archiver).
 
 ![app icon](AppScope/resources/base/media/app_icon.png)
 
@@ -24,16 +27,11 @@ and mbedTLS. No JavaScript runtimes, no WebView, no shell process.
 - TOFU host-key pinning: the SHA-256 fingerprint is shown and must be
   accepted before any credential is sent; later mismatches are rejected.
 
-**File browser**
-- Two panes side by side: local app sandbox on one side, the active SSH
-  session's SFTP home on the other (switchable).
-- Precise metadata per entry: type, size, mtime, full `rwx` mode string and
-  octal mode, `uid:gid`, symlink target.
-- Natural sorting, directory-first option, filename filter, breadcrumbs,
-  hidden-file toggle.
-- Create directory, rename, delete (recursive for directories), refresh.
-- Copy between panes in both directions with file-by-file progress and
-  cancellation; directories are merged recursively.
+**Storage mounts**
+- With the Download and Documents permissions granted at runtime, the
+  local shell exposes them as `/download` and `/documents`, so commands
+  like `ls /download`, `cp`, `cat` and `stat` work on real user files.
+- Everything else stays in the private app sandbox (`/`).
 
 **Profiles and secrets**
 - Host profiles (name, host, port, user, auth, key paths, pinned
@@ -90,8 +88,8 @@ entry/src/main/ets/
   fs/         LocalFs: ShellFs over the app sandbox
   services/   paths, profile store, secret store
   session/    local and SSH terminal sessions
-  ssh/        N-API wrapper for the native SSH/SFTP core
-  ui/         terminal canvas, key bar, file panes
+  ssh/        N-API wrapper for the native SSH core
+  ui/         terminal canvas, key bar
   pages/      tab shell, host manager, dialogs
 entry/src/main/cpp/
   napi_init.cpp, src/ssh_bridge.c   libssh2 + mbedTLS bridge
@@ -102,15 +100,13 @@ docs/         build, security and contribution notes
 
 ## Security notes
 
-- The local shell is virtual: all paths are confined to the app sandbox
-  (filesDir). There is no `exec`, no device shell and no access outside the
-  sandbox.
+- The local shell is virtual: paths stay inside the app sandbox, except
+  the opt-in `/download` and `/documents` mounts backed by the public user
+  folders. There is no `exec` and no device shell.
 - Host keys are pinned per profile (SHA-256). Changing `known_hosts`
   semantics deliberately: a mismatch is a hard stop.
 - Secrets use the system Asset Store (`@ohos.security.asset`), with
   passwords/passphrases keyed per profile.
-- SFTP and the shell run on separate channels; SFTP operations are
-  blocking and executed off the UI thread through N-API async work.
 - See [docs/SECURITY.md](docs/SECURITY.md) for the full model and known
   limitations.
 
@@ -121,8 +117,8 @@ docs/         build, security and contribution notes
   interaction uses the on-screen key bar (Esc/Tab/arrows/PgUp/PgDn/F-keys/
   Ctrl-C/D/L/Z); a hardware keyboard sends real key events.
 - No port forwarding, agent forwarding, X11, mosh or terminal multiplexing.
-- SFTP operations are serialized per connection; there is no parallel
-  transfer queue.
+- Storage mounts appear only when the runtime request is granted; the
+  Desktop folder needs a system-level permission and is not mounted.
 - The app ships no GPL components and no proprietary assets.
 
 ## License
