@@ -1,0 +1,16 @@
+# Build outputs and local tool state
+.third_party/
+**/build/
+entry/.cxx/
+oh_modules/
+node_modules/
+tests/.build/
+out/
+.hvigor/
+*.hap
+*.hsp
+local.properties
+.idea/
+.DS_Store
+
+# Node test harness copies .ets into tests/.build (ignored above)

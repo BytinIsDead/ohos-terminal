@@ -1,0 +1,167 @@
+# Copyright (C) 2026 MC4HOS Contributors
+# SPDX-License-Identifier: MPL-2.0-no-copyleft-exception
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Builds an unsigned HAP with zero repository configuration (no secrets, no
+# variables). The HarmonyOS commandline-tools come from a public,
+# login-free mirror (revision-pinned zip, ~2.1 GB):
+#
+#   commandline-tools-linux-x64-6.1.1.280.zip
+#     root dir is hyphenated: command-line-tools/
+#     hvigor    at <root>/hvigor/bin/hvigorw.js
+#     node      at <root>/tool/node/bin/node
+#     launchers at <root>/bin/{hvigorw,ohpm}
+#
+# Optional repository variable HOS_TOOLS_URL overrides the download URL.
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HOS_TOOLS_PRIMARY: https://huggingface.co/csukuangfj/harmonyos-commandline-tools/resolve/7ff999061d57e9a542fe7e02fc920961e67a163b/commandline-tools-linux-x64-6.1.1.280.zip
+  HOS_TOOLS_FALLBACK: https://huggingface.co/csukuangfj/harmonyos-commandline-tools/resolve/main/commandline-tools-linux-x64-6.1.1.280.zip
+
+jobs:
+  verify:
+    name: License, config & tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: SPDX headers (MPL-2.0-no-copyleft-exception)
+        run: python3 scripts/check_mpl_headers.py
+      - name: Config rules (strict JSON, modelVersion, SDK, pins)
+        run: python3 scripts/check_configs.py
+      - name: Core tests (terminal, shell, paths, keys, formatting)
+        working-directory: tests
+        run: npm test
+
+  build:
+    name: Build HAP (unsigned)
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache toolchain zip
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/commandline-tools.zip
+          key: hos-tools-6.1.1.280-v1
+
+      - name: Download HarmonyOS command line tools (public, no auth)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          CANDIDATES=(
+            "${{ vars.HOS_TOOLS_URL }}"
+            "$HOS_TOOLS_PRIMARY"
+            "$HOS_TOOLS_FALLBACK"
+          )
+          for url in "${CANDIDATES[@]}"; do
+            [ -n "$url" ] || continue
+            echo "Trying: $url"
+            if curl -fL --retry 3 --retry-delay 5 --connect-timeout 20 \
+                 -o ~/commandline-tools.zip "$url"; then
+              echo "Downloaded from: $url"
+              exit 0
+            fi
+            echo "Candidate failed, trying next…"
+          done
+          echo "::error::All commandline-tools sources failed."
+          exit 1
+
+      - name: Unpack and wire up toolchain
+        run: |
+          mkdir -p ~/hos-tools
+          unzip -q ~/commandline-tools.zip -d ~/hos-tools
+          HVIGORW_JS=$(find ~/hos-tools -type f -name "hvigorw.js" | head -1)
+          if [ -z "$HVIGORW_JS" ]; then
+            echo "::error::hvigorw.js not found anywhere in the zip"
+            exit 1
+          fi
+          TOOLS_HOME=$(cd "$(dirname "$HVIGORW_JS")/../.." && pwd)
+          for required in "$TOOLS_HOME/sdk" "$TOOLS_HOME/bin/hvigorw" \
+                          "$TOOLS_HOME/tool/node/bin/node"; do
+            if [ ! -e "$required" ]; then
+              echo "::error::unexpected toolchain layout: missing $required"
+              exit 1
+            fi
+          done
+          chmod +x "$TOOLS_HOME/bin/"* \
+                   "$TOOLS_HOME/hvigor/bin/hvigorw" \
+                   "$TOOLS_HOME/tool/node/bin/node" 2>/dev/null || true
+          echo "Tools root: $TOOLS_HOME"
+          echo "TOOLS_HOME=$TOOLS_HOME" >> "$GITHUB_ENV"
+          echo "$TOOLS_HOME/bin" >> "$GITHUB_PATH"
+          echo "DEVECO_SDK_HOME=$TOOLS_HOME/sdk" >> "$GITHUB_ENV"
+
+      - name: Toolchain versions
+        run: |
+          hvigorw --version || true
+          node --version || true
+
+      - name: Install oh_modules (root + entry)
+        run: |
+          ohpm install
+          cd entry && ohpm install
+          cd ..
+          echo "=== ohpm / oh_modules diagnostics ==="
+          ohpm -v || true
+          ls -la entry/oh_modules/ || true
+          if [ -e entry/oh_modules/libterminal_core.so ]; then
+            echo "SO-TYPES LINK: OK"
+            readlink -f entry/oh_modules/libterminal_core.so || true
+          else
+            echo "SO-TYPES LINK: MISSING"
+          fi
+
+      - name: Cache native sources
+        uses: actions/cache@v4
+        with:
+          path: .third_party
+          key: third-party-${{ hashFiles('entry/src/main/cpp/CMakeLists.txt') }}
+
+      - name: Build HAP (debug, unsigned)
+        run: hvigorw --mode module -p module=entry@default -p product=default assembleHap
+
+      - name: Collect HAPs
+        run: |
+          mkdir -p out
+          find entry/build -name "*.hap" -exec cp {} out/ \;
+          ls -la out
+
+      - name: Upload HAP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ohos-terminal-hap
+          path: out/*.hap
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload hvigor logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hvigor-logs
+          path: |
+            .hvigor/outputs/logs/**
+            entry/.cxx/**/*.log
+          if-no-files-found: ignore

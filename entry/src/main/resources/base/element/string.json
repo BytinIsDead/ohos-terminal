@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "OHOS Terminal — local shell, SSH sessions and a two-pane file browser"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Terminal emulator with SSH, SFTP and a detailed file browser"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Terminal"
+    },
+    {
+      "name": "perm_internet_reason",
+      "value": "Connect to SSH/SFTP servers you configure"
+    }
+  ]
+}
