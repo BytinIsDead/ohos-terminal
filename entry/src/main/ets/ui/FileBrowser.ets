@@ -22,7 +22,7 @@ import { FilePane } from './FilePane';
 export struct FileBrowser {
   localFs: LocalFs | null = null;
   sftp: SftpClient | null = null;
-  @Prop remoteVersion: number = 0;
+  @Prop @Watch('onRemoteVersion') remoteVersion: number = 0;
 
   @State localCwd: string = '/';
   @State remoteCwd: string = '';
@@ -41,6 +41,13 @@ export struct FileBrowser {
       return this.sftp.home;
     }
     return '/';
+  }
+
+  // A new active session means new credentials and a new home directory;
+  // never carry the previous host's path or selection across.
+  onRemoteVersion(): void {
+    this.remoteCwd = '';
+    this.remoteSel = null;
   }
 
   private async copyEntryToRemote(entry: FileEntry, dest: string,
